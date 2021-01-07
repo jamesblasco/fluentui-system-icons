@@ -8,6 +8,7 @@ Fluent UI System Icons are a collection of familiar, friendly and modern icons f
 
 ## Icon List
 
+[Icon Preview Website](https://jamesblasco.github.io/fluentui-system-icons/)
 [View the full list of icons](icons.md)
 
 ## Installation
