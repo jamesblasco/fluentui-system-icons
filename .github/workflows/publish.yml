@@ -1,8 +1,11 @@
 name: Publish library
 
 on:
+  workflow_dispatch:
   push:
     branches: [ master ]
+    paths:
+      - 'assets/**'
 
 env:
   LIBRARY_VERSION: 1.1.${{ github.run_number }}
@@ -51,10 +54,33 @@ jobs:
       with:
         java-version: 8
 
-    - name: Build and publish Android library
+    - name: Base64 decodes and pipes the GPG key content into the secret file
+      env:
+        GPG_KEY_CONTENT: ${{ secrets.GPG_KEY_CONTENT }}
+        SIGNING_SECRET_KEY_RING_FILE: ${{ secrets.SIGNING_SECRET_KEY_RING_FILE }}
+      run: |
+        git fetch --unshallow
+        sudo bash -c "echo '$GPG_KEY_CONTENT' | base64 -d > '$SIGNING_SECRET_KEY_RING_FILE'"
+
+    - name: Build Android library
       uses: eskatos/gradle-command-action@v1
       with:
-        arguments: bintrayUpload -DversionName=${{ env.NEW_VERSION }} -DbintrayUser=${{ secrets.BINTRAY_USER }} -DbintrayKey=${{ secrets.BINTRAY_KEY }}
+        arguments: assembleRelease -DversionName='${{ env.NEW_VERSION }}'
+        build-root-directory: android
+        wrapper-directory: android
+
+    - name: Publish to Maven Central
+      uses: eskatos/gradle-command-action@v1
+      env:
+        OSSRH_USERNAME: ${{ secrets.OSSRH_USERNAME }}
+        OSSRH_PASSWORD: ${{ secrets.OSSRH_PASSWORD }}
+        GPG_SIGNING_KEY_ID: ${{ secrets.GPG_SIGNING_KEY_ID }}
+        GPG_SIGNING_PASSWORD: ${{ secrets.GPG_SIGNING_PASSWORD }}
+        SIGNING_SECRET_KEY_RING_FILE: ${{ secrets.SIGNING_SECRET_KEY_RING_FILE }}
+        SONATYPE_STAGING_PROFILE_ID: ${{ secrets.SONATYPE_STAGING_PROFILE_ID }}
+        VERSION_NAME: ${{ env.NEW_VERSION }}
+      with:
+        arguments: publishReleasePublicationToSonatypeRepository --max-workers 1 closeAndReleaseSonatypeStagingRepository
         build-root-directory: android
         wrapper-directory: android
 
@@ -114,6 +140,12 @@ jobs:
         rm packages/svg-icons/package.json.bk
 
     # Needs to be "-E" instead of "-r" on macOS
+    - name: Replace version number in react-icons/package.json
+      run: |
+        sed -i.bk -r "s/\"version\": \"[0-9]+\.[0-9]+\.[0-9]+\"/\"version\": \"$NEW_VERSION\"/g" packages/react-icons/package.json
+        rm packages/react-icons/package.json.bk
+
+    # Needs to be "-E" instead of "-r" on macOS
     - name: Replace version number in _manifest.json
       run: |
         sed -i.bk -r "s/[0-9]+\.[0-9]+\.[0-9]+/$NEW_VERSION/g" _iconCloud/manifest.json
@@ -131,11 +163,23 @@ jobs:
         npm run build
       working-directory: packages/svg-icons
 
+    - name: Build React library
+      run: |
+        npm install
+        npm run build
+      working-directory: packages/react-icons
+
     - uses: JS-DevTools/npm-publish@v1
       with:
         token: ${{ secrets.NPM_TOKEN }}
         access: public
         package: packages/svg-icons/package.json
+
+    - uses: JS-DevTools/npm-publish@v1
+      with:
+        token: ${{ secrets.NPM_TOKEN }}
+        access: public
+        package: packages/react-icons/package.json
 
     - name: Update icon sheet
       run: python3 generate_icons_md.py
